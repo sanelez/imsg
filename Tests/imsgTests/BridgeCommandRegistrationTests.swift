@@ -105,6 +105,12 @@ func injectedHelperWiresNativePollSend() throws {
   #expect(source.contains("pollPreviewImageData"))
   #expect(sendPollBody.contains("buildPollCreationPayloadData"))
   #expect(sendPollBody.contains("buildPollIMMessage"))
+  #expect(sendPollBody.contains("selectedMessageGuid"))
+  #expect(sendPollBody.contains("deriveThreadIdentifier"))
+  #expect(sendPollBody.contains("setThreadOriginator:"))
+  #expect(sendPollBody.contains("parentMessage"))
+  #expect(sendPollBody.contains("parentItem"))
+  #expect(sendPollBody.contains("threadIdentifier"))
   #expect(sendPollBody.contains("dispatchIMMessageInChat(chat, imMessage)"))
   #expect(
     source.contains(

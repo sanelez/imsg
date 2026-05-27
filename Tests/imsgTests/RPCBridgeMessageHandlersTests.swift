@@ -49,13 +49,14 @@ func rpcPollSendInvokesBridgeWithResolvedChat() async throws {
   )
 
   await server.handleLineForTesting(
-    #"{"jsonrpc":"2.0","id":"poll","method":"poll.send","params":{"chat_id":1,"question":"Dinner?","options":["Pizza","Sushi"]}}"#
+    #"{"jsonrpc":"2.0","id":"poll","method":"poll.send","params":{"chat_id":1,"question":"Dinner?","options":["Pizza","Sushi"],"reply_to":"parent-guid"}}"#
   )
 
   #expect(capturedAction == .sendPoll)
   #expect(capturedParams["chatGuid"] as? String == "iMessage;+;chat123")
   #expect(capturedParams["question"] as? String == "Dinner?")
   #expect(capturedParams["options"] as? [String] == ["Pizza", "Sushi"])
+  #expect(capturedParams["selectedMessageGuid"] as? String == "parent-guid")
   let result = output.responses.first?["result"] as? [String: Any]
   #expect(result?["event"] as? String == "imessage.poll.created")
   #expect(result?["guid"] as? String == "poll-guid")

@@ -64,12 +64,11 @@ extension MessageStore {
           columns: query.selection.columns,
           fallbackChatID: query.fallbackChatID
         )
-        let replyToGUID = replyToGUID(
-          associatedGuid: decoded.associatedGUID,
-          associatedType: decoded.associatedType
-        )
+        let replyToGUID = routedReplyToGUID(decoded)
         let threadOriginatorGUID =
           decoded.threadOriginatorGUID.isEmpty ? nil : decoded.threadOriginatorGUID
+        let threadOriginatorPart =
+          decoded.threadOriginatorPart.isEmpty ? nil : decoded.threadOriginatorPart
         let parent = enrichedReplyContext(
           db,
           replyToGUID: replyToGUID,
@@ -91,6 +90,7 @@ extension MessageStore {
             routing: Message.RoutingMetadata(
               replyToGUID: replyToGUID,
               threadOriginatorGUID: threadOriginatorGUID,
+              threadOriginatorPart: threadOriginatorPart,
               destinationCallerID: decoded.destinationCallerID.isEmpty
                 ? nil : decoded.destinationCallerID,
               replyToText: parent?.text,

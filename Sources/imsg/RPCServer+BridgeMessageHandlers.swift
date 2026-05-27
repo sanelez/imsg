@@ -83,6 +83,11 @@ extension RPCServer {
     {
       bridgeParams["creatorHandle"] = creatorHandle
     }
+    if let reply = stringParam(
+      params["reply_to"] ?? params["replyTo"] ?? params["reply_to_guid"] ?? params["message_guid"]
+    ), !reply.isEmpty {
+      bridgeParams["selectedMessageGuid"] = reply
+    }
 
     let data = try await invokeBridge(action: .sendPoll, params: bridgeParams)
     var result: [String: Any] = [

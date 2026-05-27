@@ -250,6 +250,7 @@ public struct Message: Sendable, Equatable {
   public struct RoutingMetadata: Sendable, Equatable {
     public let replyToGUID: String?
     public let threadOriginatorGUID: String?
+    public let threadOriginatorPart: String?
     public let destinationCallerID: String?
     public let replyToText: String?
     public let replyToSender: String?
@@ -257,12 +258,14 @@ public struct Message: Sendable, Equatable {
     public init(
       replyToGUID: String? = nil,
       threadOriginatorGUID: String? = nil,
+      threadOriginatorPart: String? = nil,
       destinationCallerID: String? = nil,
       replyToText: String? = nil,
       replyToSender: String? = nil
     ) {
       self.replyToGUID = replyToGUID
       self.threadOriginatorGUID = threadOriginatorGUID
+      self.threadOriginatorPart = threadOriginatorPart
       self.destinationCallerID = destinationCallerID
       self.replyToText = replyToText
       self.replyToSender = replyToSender
@@ -293,6 +296,7 @@ public struct Message: Sendable, Equatable {
   public let guid: String
   public let replyToGUID: String?
   public let threadOriginatorGUID: String?
+  public let threadOriginatorPart: String?
   /// Text of the message this one replies to (Threader reply or non-reaction
   /// association). Resolved by joining `replyToGUID` or `threadOriginatorGUID`
   /// back to the parent row; nil when no parent exists or it is no longer
@@ -345,6 +349,7 @@ public struct Message: Sendable, Equatable {
     self.guid = guid
     self.replyToGUID = routing.replyToGUID
     self.threadOriginatorGUID = routing.threadOriginatorGUID
+    self.threadOriginatorPart = routing.threadOriginatorPart
     self.replyToText = routing.replyToText
     self.replyToSender = routing.replyToSender
     self.sender = sender
@@ -375,6 +380,7 @@ public struct Message: Sendable, Equatable {
     guid: String = "",
     replyToGUID: String? = nil,
     threadOriginatorGUID: String? = nil,
+    threadOriginatorPart: String? = nil,
     destinationCallerID: String? = nil,
     replyToText: String? = nil,
     replyToSender: String? = nil,
@@ -398,6 +404,7 @@ public struct Message: Sendable, Equatable {
       routing: RoutingMetadata(
         replyToGUID: replyToGUID,
         threadOriginatorGUID: threadOriginatorGUID,
+        threadOriginatorPart: threadOriginatorPart,
         destinationCallerID: destinationCallerID,
         replyToText: replyToText,
         replyToSender: replyToSender

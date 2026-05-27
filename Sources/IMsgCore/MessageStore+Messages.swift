@@ -22,6 +22,8 @@ struct MessageRowColumns {
   let attachments: String
   let body: String
   let threadOriginatorGUID: String
+  let threadOriginatorPart: String
+  let replyToGUID: String
   let balloonBundleID: String
   let payloadData: String
   let messageSummaryInfo: String
@@ -44,6 +46,8 @@ struct MessageRowColumns {
       attachments: "attachments",
       body: "body",
       threadOriginatorGUID: "thread_originator_guid",
+      threadOriginatorPart: "thread_originator_part",
+      replyToGUID: "reply_to_guid",
       balloonBundleID: MessageRowColumns.balloonBundleID,
       payloadData: MessageRowColumns.payloadData,
       messageSummaryInfo: MessageRowColumns.messageSummaryInfo
@@ -66,6 +70,8 @@ struct DecodedMessageRow {
   let associatedType: Int?
   let attachments: Int
   let threadOriginatorGUID: String
+  let threadOriginatorPart: String
+  let databaseReplyToGUID: String
   let poll: MessagePollEvent?
 }
 
@@ -85,6 +91,9 @@ struct MessageRowSelection {
     let audioMessageColumn = schema.hasAudioMessageColumn ? "m.is_audio_message" : "0"
     let threadOriginatorColumn =
       schema.hasThreadOriginatorGUIDColumn ? "m.thread_originator_guid" : "NULL"
+    let threadOriginatorPartColumn =
+      schema.hasThreadOriginatorPartColumn ? "m.thread_originator_part" : "NULL"
+    let replyToColumn = schema.hasReplyToGUIDColumn ? "m.reply_to_guid" : "NULL"
     let balloonColumn = schema.hasBalloonBundleIDColumn ? "m.balloon_bundle_id" : "NULL"
     let pollCandidatePredicate = Self.pollCandidatePredicate(schema: schema)
     let payloadDataColumn =
@@ -107,6 +116,8 @@ struct MessageRowSelection {
              (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) AS \(columns.attachments),
              \(bodyColumn) AS \(columns.body),
              \(threadOriginatorColumn) AS \(columns.threadOriginatorGUID),
+             \(threadOriginatorPartColumn) AS \(columns.threadOriginatorPart),
+             \(replyToColumn) AS \(columns.replyToGUID),
              \(balloonColumn) AS \(columns.balloonBundleID),
              \(payloadDataColumn) AS \(columns.payloadData),
              \(summaryInfoColumn) AS \(columns.messageSummaryInfo)
@@ -163,12 +174,11 @@ extension MessageStore {
           columns: query.selection.columns,
           fallbackChatID: query.fallbackChatID
         )
-        let replyToGUID = replyToGUID(
-          associatedGuid: decoded.associatedGUID,
-          associatedType: decoded.associatedType
-        )
+        let replyToGUID = routedReplyToGUID(decoded)
         let threadOriginatorGUID =
           decoded.threadOriginatorGUID.isEmpty ? nil : decoded.threadOriginatorGUID
+        let threadOriginatorPart =
+          decoded.threadOriginatorPart.isEmpty ? nil : decoded.threadOriginatorPart
         let parent = enrichedReplyContext(
           db,
           replyToGUID: replyToGUID,
@@ -190,6 +200,7 @@ extension MessageStore {
             routing: Message.RoutingMetadata(
               replyToGUID: replyToGUID,
               threadOriginatorGUID: threadOriginatorGUID,
+              threadOriginatorPart: threadOriginatorPart,
               destinationCallerID: decoded.destinationCallerID.isEmpty
                 ? nil : decoded.destinationCallerID,
               replyToText: parent?.text,
@@ -256,13 +267,13 @@ extension MessageStore {
           associatedGUID: decoded.associatedGUID,
           text: decoded.text
         )
-        let replyToGUID = replyToGUID(
-          associatedGuid: decoded.associatedGUID,
-          associatedType: decoded.associatedType
-        )
+        let replyToGUID = routedReplyToGUID(decoded)
         let threadOriginatorGUID =
           reaction.isReaction || decoded.threadOriginatorGUID.isEmpty
           ? nil : decoded.threadOriginatorGUID
+        let threadOriginatorPart =
+          reaction.isReaction || decoded.threadOriginatorPart.isEmpty
+          ? nil : decoded.threadOriginatorPart
         let parent =
           reaction.isReaction
           ? nil
@@ -288,6 +299,7 @@ extension MessageStore {
             routing: Message.RoutingMetadata(
               replyToGUID: replyToGUID,
               threadOriginatorGUID: threadOriginatorGUID,
+              threadOriginatorPart: threadOriginatorPart,
               destinationCallerID: decoded.destinationCallerID.isEmpty
                 ? nil : decoded.destinationCallerID,
               replyToText: parent?.text,
@@ -327,12 +339,11 @@ extension MessageStore {
           fallbackChatID: query.fallbackChatID
         )
         guard decoded.text == text else { continue }
-        let replyToGUID = replyToGUID(
-          associatedGuid: decoded.associatedGUID,
-          associatedType: decoded.associatedType
-        )
+        let replyToGUID = routedReplyToGUID(decoded)
         let threadOriginatorGUID =
           decoded.threadOriginatorGUID.isEmpty ? nil : decoded.threadOriginatorGUID
+        let threadOriginatorPart =
+          decoded.threadOriginatorPart.isEmpty ? nil : decoded.threadOriginatorPart
         var parentCache: ReplyParentCache = [:]
         let parent = enrichedReplyContext(
           db,
@@ -354,6 +365,7 @@ extension MessageStore {
           routing: Message.RoutingMetadata(
             replyToGUID: replyToGUID,
             threadOriginatorGUID: threadOriginatorGUID,
+            threadOriginatorPart: threadOriginatorPart,
             destinationCallerID: decoded.destinationCallerID.isEmpty
               ? nil : decoded.destinationCallerID,
             replyToText: parent?.text,
@@ -423,6 +435,8 @@ extension MessageStore {
     let attachments = try intValue(row, columns.attachments) ?? 0
     let body = try dataValue(row, columns.body)
     let threadOriginatorGUID = try stringValue(row, columns.threadOriginatorGUID)
+    let threadOriginatorPart = try stringValue(row, columns.threadOriginatorPart)
+    let databaseReplyToGUID = try stringValue(row, columns.replyToGUID)
     let balloonBundleID = try stringValue(row, columns.balloonBundleID)
 
     var resolvedText = text.isEmpty ? TypedStreamParser.parseAttributedBody(body) : text
@@ -468,6 +482,8 @@ extension MessageStore {
       associatedType: associatedType,
       attachments: attachments,
       threadOriginatorGUID: threadOriginatorGUID,
+      threadOriginatorPart: threadOriginatorPart,
+      databaseReplyToGUID: databaseReplyToGUID,
       poll: poll
     )
   }
@@ -489,6 +505,20 @@ extension MessageStore {
       isPrepared: (try intValue(row, "is_prepared") ?? 0) != 0,
       isPendingSatelliteSend: (try intValue(row, "is_pending_satellite_send") ?? 0) != 0,
       wasDowngraded: (try intValue(row, "was_downgraded") ?? 0) != 0
+    )
+  }
+
+  func routedReplyToGUID(_ row: DecodedMessageRow) -> String? {
+    if let associatedType = row.associatedType, ReactionType.isReaction(associatedType) {
+      return nil
+    }
+    let databaseReplyToGUID = normalizeAssociatedGUID(row.databaseReplyToGUID)
+    if !databaseReplyToGUID.isEmpty {
+      return databaseReplyToGUID
+    }
+    return replyToGUID(
+      associatedGuid: row.associatedGUID,
+      associatedType: row.associatedType
     )
   }
 }

@@ -95,6 +95,7 @@ func pollCommandSendInvokesPollBridge() async throws {
     options: [
       "chat": ["iMessage;-;+15551234567"],
       "question": ["Dinner?"],
+      "replyTo": ["parent-guid"],
       "option": ["Pizza", "Sushi"],
     ],
     flags: []
@@ -119,6 +120,7 @@ func pollCommandSendInvokesPollBridge() async throws {
   #expect(capturedParams["chatGuid"] as? String == "iMessage;-;+15551234567")
   #expect(capturedParams["question"] as? String == "Dinner?")
   #expect(capturedParams["options"] as? [String] == ["Pizza", "Sushi"])
+  #expect(capturedParams["selectedMessageGuid"] as? String == "parent-guid")
   #expect(output.contains("poll: sent (guid=poll-guid)"))
 }
 

@@ -291,6 +291,7 @@ enum PollCommand {
           .make(label: "chat", names: [.long("chat")], help: "chat guid or rowid"),
           .make(label: "chatID", names: [.long("chat-id")], help: "chat rowid"),
           .make(label: "question", names: [.long("question")], help: "poll question"),
+          .make(label: "replyTo", names: [.long("reply-to")], help: "guid of message to reply to"),
           .make(
             label: "option", names: [.long("option")],
             help: "poll option text; pass at least twice"),
@@ -298,7 +299,8 @@ enum PollCommand {
       )
     ),
     usageExamples: [
-      "imsg poll send --chat 'iMessage;-;+15551234567' --question 'Dinner?' --option 'Pizza' --option 'Sushi'"
+      "imsg poll send --chat 'iMessage;-;+15551234567' --question 'Dinner?' --option 'Pizza' --option 'Sushi'",
+      "imsg poll send --chat 'iMessage;-;+15551234567' --reply-to ABCD --question 'Approve?' --option 'Yes' --option 'No'",
     ]
   ) { values, runtime in
     try await run(values: values, runtime: runtime)
@@ -327,13 +329,18 @@ enum PollCommand {
       throw ParsedValuesError.missingOption("option")
     }
 
+    var params: [String: Any] = [
+      "chatGuid": chat,
+      "question": question,
+      "options": options,
+    ]
+    if let reply = values.option("replyTo"), !reply.isEmpty {
+      params["selectedMessageGuid"] = reply
+    }
+
     _ = try await BridgeOutput.invokeAndEmit(
       action: .sendPoll,
-      params: [
-        "chatGuid": chat,
-        "question": question,
-        "options": options,
-      ],
+      params: params,
       runtime: runtime,
       invokeBridge: invokeBridge
     ) { data in

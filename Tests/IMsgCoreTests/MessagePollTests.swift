@@ -407,11 +407,14 @@ func messageStoreDecodesPollVoteRowsWithPayloadGate() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 10)
   let voteMessage = try #require(messages.first { $0.guid == "vote-row-guid" })
+  let streamedMessages = try store.messagesAfter(afterRowID: 0, chatID: 1, limit: 10)
+  let streamedVote = try #require(streamedMessages.first { $0.guid == "vote-row-guid" })
 
   #expect(voteMessage.poll?.kind == .vote)
   #expect(voteMessage.poll?.originalGUID == "original-poll-guid")
   #expect(voteMessage.poll?.creator == nil)
   #expect(voteMessage.poll?.vote?.participant == "+15550002000")
+  #expect(streamedVote.poll?.kind == .vote)
 }
 
 @Test
