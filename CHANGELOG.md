@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.12.1 - Unreleased
+
 ## 0.12.0 - 2026-07-02
 
 ### Send
