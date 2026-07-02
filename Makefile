@@ -40,6 +40,7 @@ build-dylib:
 	@mkdir -p .build/release
 	@clang -dynamiclib -arch arm64e -fobjc-arc \
 		-Wno-arc-performSelector-leaks \
+		-install_name @rpath/imsg-bridge-helper.dylib \
 		-framework Foundation \
 		-framework AppKit \
 		-o .build/release/imsg-bridge-helper.dylib \

@@ -2,6 +2,10 @@
 
 ## 0.12.1 - Unreleased
 
+### Packaging
+- fix: make Linux release archives standalone by statically linking the Swift runtime.
+- fix: preserve the bridge helper's Developer ID signature through Homebrew installation by using a stable relocatable install name.
+
 ## 0.12.0 - 2026-07-02
 
 ### Send

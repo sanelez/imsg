@@ -22,7 +22,7 @@ TARGET_ARCH="${TARGET_TRIPLE%%-*}"
 BUILD_DIR="${ROOT}/.build/${TARGET_TRIPLE}/${BUILD_MODE}"
 ARCHIVE_NAME="${APP_NAME}-linux-${TARGET_ARCH}.tar.gz"
 
-swift build -c "$BUILD_MODE" --product "$APP_NAME"
+swift build -c "$BUILD_MODE" --product "$APP_NAME" --static-swift-stdlib
 
 cp "${BUILD_DIR}/${APP_NAME}" "${DIST_DIR}/${APP_NAME}"
 for bundle in "${BUILD_DIR}"/*.bundle; do

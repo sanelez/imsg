@@ -33,6 +33,7 @@ for ARCH in "${HELPER_ARCH_LIST[@]}"; do
 done
 clang -dynamiclib "${HELPER_CLANG_ARCH_ARGS[@]}" -fobjc-arc \
   -Wno-arc-performSelector-leaks \
+  -install_name "@rpath/${HELPER_NAME}" \
   -framework Foundation \
   -framework AppKit \
   -o "${DIST_DIR}/${HELPER_NAME}" \

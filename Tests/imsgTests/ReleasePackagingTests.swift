@@ -26,6 +26,25 @@ func universalBuildScriptDefaultsToBothMacArchitectures() throws {
 }
 
 @Test
+func linuxReleaseStaticallyLinksSwiftRuntime() throws {
+  let script = try readRepositoryFile("scripts/build-linux.sh")
+
+  #expect(script.contains("--static-swift-stdlib"))
+}
+
+@Test
+func bridgeHelperBuildsUseRelocatableInstallName() throws {
+  let developmentBuild = try readRepositoryFile("Makefile")
+  let universalBuild = try readRepositoryFile("scripts/build-universal.sh")
+  let notarizedBuild = try readRepositoryFile("scripts/sign-and-notarize.sh")
+
+  #expect(developmentBuild.contains("-install_name @rpath/imsg-bridge-helper.dylib"))
+  for script in [universalBuild, notarizedBuild] {
+    #expect(script.contains(#"-install_name "@rpath/${HELPER_NAME}""#))
+  }
+}
+
+@Test
 func executablePlistDeclaresContactsUsageDescription() throws {
   let plist = try readRepositoryFile("Sources/imsg/Resources/Info.plist")
   let generator = try readRepositoryFile("scripts/generate-version.sh")
