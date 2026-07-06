@@ -10,6 +10,14 @@ enum PollCommand {
       Requires `imsg launch` (SIP-disabled, dylib injected). Use the `send`
       action to create a native Messages Polls extension balloon, or the `vote`
       action to cast a vote on an existing poll.
+
+      Messages renders only the options on a poll balloon — the poll title is
+      never shown to recipients. So `send` automatically sends `--question` as a
+      plain caption message right after the poll (matching how the native
+      "comment or Send" field renders — a message with no thread metadata, not a
+      threaded reply). Callers pass only `--question` and the visible caption
+      appears for free; `--comment` overrides the caption text when it should
+      differ from the title.
       """,
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
@@ -19,7 +27,19 @@ enum PollCommand {
         options: CommandSignatures.baseOptions() + [
           .make(label: "chat", names: [.long("chat")], help: "chat guid or rowid"),
           .make(label: "chatID", names: [.long("chat-id")], help: "chat rowid"),
-          .make(label: "question", names: [.long("question")], help: "poll question"),
+          .make(
+            label: "question", names: [.long("question")],
+            help:
+              "poll question. Messages does not render the poll title on the balloon, so imsg "
+              + "sends this as a plain caption message right after the poll (the visible text) "
+              + "and also stores it as the payload title for agent readback"
+          ),
+          .make(
+            label: "comment", names: [.long("comment")],
+            help:
+              "optional override for the caption text; defaults to --question. Sent as a plain "
+              + "message right after the poll, matching Messages' native 'comment or Send' field"
+          ),
           .make(label: "replyTo", names: [.long("reply-to")], help: "guid of message to reply to"),
           .make(
             label: "option", names: [.long("option")],
@@ -38,6 +58,7 @@ enum PollCommand {
     ),
     usageExamples: [
       "imsg poll send --chat 'iMessage;-;+15551234567' --question 'Dinner?' --option 'Pizza' --option 'Sushi'",
+      "imsg poll send --chat 'iMessage;-;+15551234567' --question 'Dinner?' --comment 'Vote by 5pm 🍽️' --option 'Pizza' --option 'Sushi'",
       "imsg poll send --chat 'iMessage;-;+15551234567' --reply-to ABCD --question 'Approve?' --option 'Yes' --option 'No'",
       "imsg poll vote --chat 'iMessage;-;+15551234567' --poll ABCD --option-id 1B2C-...",
     ]
@@ -92,7 +113,7 @@ enum PollCommand {
       params["selectedMessageGuid"] = reply
     }
 
-    _ = try await BridgeOutput.invokeAndEmit(
+    let data = try await BridgeOutput.invokeAndEmit(
       action: .sendPoll,
       params: params,
       runtime: runtime,
@@ -100,6 +121,36 @@ enum PollCommand {
     ) { data in
       let guid = (data["messageGuid"] as? String) ?? ""
       return guid.isEmpty ? "poll: queued" : "poll: sent (guid=\(guid))"
+    }
+
+    // Messages renders only the poll options on the balloon — the poll title
+    // (payload item.title) is never shown to recipients. To make the poll's
+    // question visible we send it as a PLAIN caption message right after the
+    // poll, matching how the native "comment or Send" field renders. It is NOT
+    // a threaded reply: native poll comments carry no thread metadata, so a
+    // reply (which sets thread_originator) would decorate the poll balloon with
+    // a reply connector. Outbound (from_me) rows are cached and never
+    // re-processed downstream, so no poll<->comment link is needed on our sends.
+    // Callers set only --question; the caption comes for free, so agents need no
+    // knowledge of this. --comment overrides the echoed text.
+    let comment = values.option("comment").flatMap { $0.isEmpty ? nil : $0 } ?? question
+    let pollGuid = (data["messageGuid"] as? String) ?? ""
+    if !comment.isEmpty {
+      // Best-effort, mirroring the RPC path: the poll already delivered, so a
+      // caption failure must not exit nonzero — a retry would send a duplicate
+      // poll. Report the failure on stderr and leave the poll success intact.
+      do {
+        _ = try await invokeBridge(
+          .sendMessage,
+          [
+            "chatGuid": chat,
+            "message": comment,
+          ])
+      } catch {
+        let pollDescription = pollGuid.isEmpty ? "queued poll" : "poll \(pollGuid)"
+        FileHandle.standardError.write(
+          Data("[imsg] poll send: comment echo failed for \(pollDescription): \(error)\n".utf8))
+      }
     }
   }
 
