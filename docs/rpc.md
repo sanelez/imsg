@@ -37,6 +37,33 @@ Result:
 { "chats": [Chat] }
 ```
 
+### `messages.stats`
+
+Params:
+
+- `chat_id` (int, optional)
+- `time_zone` (IANA identifier, optional; defaults to the local timezone)
+- `include_media` (bool, default `false`)
+
+Result:
+
+```json
+{
+  "total_messages": 123,
+  "sent_messages": 60,
+  "received_messages": 63,
+  "time_zone": "Europe/Vienna",
+  "chats": [],
+  "senders": [],
+  "services": [],
+  "dates": []
+}
+```
+
+When media is requested, `media` includes distinct attachment totals and bytes grouped by
+UTI/MIME and chat. Otherwise the `media` key is omitted. Invalid, non-positive, or nonexistent
+`chat_id` values return invalid params rather than widening to all chats.
+
 ### `messages.history`
 
 Params:
