@@ -65,6 +65,24 @@ Returned by `imsg history`, `imsg search`, `imsg watch`, and the JSON-RPC `messa
 
 Read state is a database snapshot. A watch notification includes the state present when that message row is emitted; reading it later does not generate a second message notification.
 
+## Scheduled message
+
+Returned by `imsg scheduled list --json` and in the JSON-RPC `messages.scheduled` result. Only future outbound rows with native scheduling state are included.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | int | Scheduled message rowid. |
+| `guid` | string | Native message GUID. |
+| `chat_id` | int | Local chat rowid. |
+| `chat_identifier` | string | Portable chat identifier. |
+| `chat_guid` | string | Portable chat GUID. |
+| `chat_name` | string | Display name or identifier fallback. |
+| `text` | string | Scheduled message body. |
+| `service` | string | Message service, normally `iMessage`. |
+| `scheduled_at` | ISO8601 | Requested delivery time. |
+| `schedule_type` | int | Raw Messages scheduling type. |
+| `schedule_state` | int | Raw Messages scheduling state. |
+
 ### URL preview coalescing
 
 Messages may store a link send as two rows: the user's text row and a later `com.apple.messages.URLBalloonProvider` preview row. `history`, `search`, `watch`, `messages.history`, and `watch.subscribe` coalesce those rows into one logical message when the preview immediately follows a same-chat/same-sender text row containing the preview URL. In batch reads the coalesced message includes:

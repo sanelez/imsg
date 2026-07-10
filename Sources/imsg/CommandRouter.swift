@@ -23,6 +23,7 @@ struct CommandRouter {
       StatusCommand.spec,
       RpcCommand.spec,
       CompletionsCommand.spec,
+      ScheduledCommand.spec,
       // Bridge-backed (require `imsg launch` + SIP off)
       SendRichCommand.spec,
       SendMultipartCommand.spec,

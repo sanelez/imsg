@@ -5,6 +5,7 @@
 ### Read Commands
 - feat: expose per-chat unread counts and inbound message read timestamps across JSON, JSON-RPC, search, history, and watch, with an unread-only chat filter (#160, #170, thanks @chiedo).
 - feat: add snapshot-consistent logical message statistics through `imsg stats` and `messages.stats`, with strict chat scoping, timezone-aware date buckets, and deduplicated optional media totals (#161, thanks @omarshahine).
+- feat: inspect future Send Later rows read-only through `imsg scheduled list` and `messages.scheduled`, without requiring the private IMCore bridge (#163, thanks @omarshahine).
 
 ### Packaging
 - fix: isolate universal builds per architecture and consume SwiftPM's reported product paths so stale slices cannot silently ship older CLI code.
