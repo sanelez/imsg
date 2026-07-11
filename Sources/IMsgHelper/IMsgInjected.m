@@ -284,6 +284,7 @@ static BOOL gHasSendMessageReason = NO;      // sendMessage:reason:
 
 static BOOL pollPayloadMessageInitializerAvailable(void);
 static BOOL pollVoteMessageInitializerAvailable(void);
+static NSDictionary *nicknameSharingSelectorStatus(void);
 static BOOL urlPreviewMessageInitializerAvailable(void);
 
 static void probeSelectors(void) {
@@ -311,6 +312,7 @@ static void probeSelectors(void) {
 @interface IMAccount : NSObject
 - (NSArray *)vettedAliases;
 - (id)loginIMHandle;
+- (id)imHandleWithID:(NSString *)handleID;
 - (NSString *)serviceName;
 - (BOOL)isActive;
 @end
@@ -346,6 +348,7 @@ static void probeSelectors(void) {
 - (id)lastMessage;
 - (id)lastSentMessage;
 - (id)account;
+- (NSString *)lastAddressedHandleID;
 - (NSString *)displayNameForChat;
 - (void)sendMessage:(id)message;
 - (void)_sendMessage:(id)message adjustingSender:(BOOL)adjust shouldQueue:(BOOL)queue;
@@ -474,8 +477,15 @@ static NSAttributedString *annotateBodyForRichLink(NSAttributedString *body,
 @end
 
 @interface IMNicknameController : NSObject
-+ (instancetype)sharedController;
-- (id)nicknameForHandle:(NSString *)handle;
++ (instancetype)sharedInstance;
+- (id)personalNickname;
+- (BOOL)isInitialLoadComplete;
+- (id)nicknameForHandle:(IMHandle *)handle;
+- (BOOL)shouldOfferNicknameSharingForChat:(IMChat *)chat;
+- (void)allowHandlesForNicknameSharing:(NSArray *)handles
+                               forChat:(IMChat *)chat
+                            fromHandle:(NSString *)fromHandleID
+                             forceSend:(BOOL)forceSend;
 @end
 
 @interface IDSIDQueryController : NSObject
@@ -937,6 +947,7 @@ static NSDictionary* handleStatus(NSInteger requestId, NSDictionary *params) {
         }
     }
 
+    NSDictionary *nicknameSelectors = nicknameSharingSelectorStatus();
     Class stickerTransferClass = NSClassFromString(@"IMFileTransfer");
     Class transferCenterClass = NSClassFromString(@"IMFileTransferCenter");
     BOOL stickerSetIsSticker = [stickerTransferClass instancesRespondToSelector:
@@ -971,7 +982,6 @@ static NSDictionary* handleStatus(NSInteger requestId, NSDictionary *params) {
     BOOL stickerAssociatedMessage = stickerAssociatedMessageInitializerAvailable();
     BOOL stickerSend = stickerSetIsSticker && stickerSetUserInfo
         && stickerSetAttribution && stickerTransferCenter && stickerAttachmentMessage;
-
     NSDictionary *selectors = @{
         @"editMessageItem": @(gHasEditMessageItem),
         @"editMessage": @(gHasEditMessage),
@@ -979,6 +989,9 @@ static NSDictionary* handleStatus(NSInteger requestId, NSDictionary *params) {
         @"sendMessageReason": @(gHasSendMessageReason),
         @"pollPayloadMessage": @(pollPayloadMessageInitializerAvailable()),
         @"pollVoteMessage": @(pollVoteMessageInitializerAvailable()),
+        @"nicknameLookup": nicknameSelectors[@"nickname_lookup"],
+        @"namePhotoShouldOffer": nicknameSelectors[@"should_offer"],
+        @"namePhotoShare": nicknameSelectors[@"share"],
         @"stickerSetIsSticker": @(stickerSetIsSticker),
         @"stickerSetUserInfo": @(stickerSetUserInfo),
         @"stickerSetAttribution": @(stickerSetAttribution),
@@ -6072,23 +6085,269 @@ static NSDictionary *handleGetAccountInfo(NSInteger requestId, NSDictionary *par
     return successResponse(requestId, info);
 }
 
-static NSDictionary *handleGetNicknameInfo(NSInteger requestId, NSDictionary *params) {
-    NSString *address = params[@"address"];
+static id sharedNicknameController(void) {
     Class nnClass = NSClassFromString(@"IMNicknameController");
-    if (!nnClass) return errorResponse(requestId, @"IMNicknameController unavailable");
-    id ctrl = [nnClass performSelector:@selector(sharedController)];
-    if (!ctrl) return errorResponse(requestId, @"controller nil");
+    SEL sharedSelector = @selector(sharedInstance);
+    if (!nnClass || ![(id)nnClass respondsToSelector:sharedSelector]) return nil;
+    return ((id (*)(id, SEL))objc_msgSend)(nnClass, sharedSelector);
+}
 
-    NSMutableDictionary *info = [NSMutableDictionary dictionary];
-    if (address.length && [ctrl respondsToSelector:@selector(nicknameForHandle:)]) {
-        id nickname = [ctrl performSelector:@selector(nicknameForHandle:) withObject:address];
-        info[@"address"] = address;
-        info[@"has_nickname"] = @(nickname != nil);
-        if (nickname) {
-            info[@"description"] = [nickname description] ?: @"";
+static BOOL waitForNicknameControllerLoad(id controller, NSTimeInterval timeout) {
+    SEL loadedSelector = @selector(isInitialLoadComplete);
+    if (![controller respondsToSelector:loadedSelector]) return YES;
+
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
+    while (!((BOOL (*)(id, SEL))objc_msgSend)(controller, loadedSelector)) {
+        if ([deadline timeIntervalSinceNow] <= 0) return NO;
+        NSDate *nextCheck = [NSDate dateWithTimeIntervalSinceNow:0.05];
+        if ([NSThread isMainThread]) {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:nextCheck];
+        } else {
+            [NSThread sleepForTimeInterval:0.05];
         }
     }
-    return successResponse(requestId, info);
+    return YES;
+}
+
+static NSString *nicknameSharingMutationSelectorName(Class nnClass) {
+    if (!nnClass) return nil;
+    NSString *selectorName =
+        @"allowHandlesForNicknameSharing:forChat:fromHandle:forceSend:";
+    return [nnClass instancesRespondToSelector:NSSelectorFromString(selectorName)]
+        ? selectorName
+        : nil;
+}
+
+static NSDictionary *nicknameSharingSelectorStatus(void) {
+    Class nnClass = NSClassFromString(@"IMNicknameController");
+    BOOL hasSharedInstance = nnClass && [(id)nnClass respondsToSelector:@selector(sharedInstance)];
+    BOOL hasLookup = nnClass &&
+        [nnClass instancesRespondToSelector:@selector(nicknameForHandle:)];
+    BOOL hasShouldOffer = nnClass &&
+        [nnClass instancesRespondToSelector:@selector(shouldOfferNicknameSharingForChat:)];
+    NSString *shareSelector = nicknameSharingMutationSelectorName(nnClass);
+    return @{
+        @"controller": @(hasSharedInstance),
+        @"nickname_lookup": @(hasSharedInstance && hasLookup),
+        @"should_offer": @(hasSharedInstance && hasShouldOffer),
+        @"share": @(hasSharedInstance && shareSelector != nil),
+        @"share_selector": shareSelector ?: [NSNull null]
+    };
+}
+
+static IMAccount *activeIMessageAccount(void) {
+    Class accountControllerClass = NSClassFromString(@"IMAccountController");
+    id accountController = accountControllerClass &&
+            [(id)accountControllerClass respondsToSelector:@selector(sharedInstance)]
+        ? ((id (*)(id, SEL))objc_msgSend)(accountControllerClass, @selector(sharedInstance))
+        : nil;
+    if ([accountController respondsToSelector:@selector(activeIMessageAccount)]) {
+        return ((id (*)(id, SEL))objc_msgSend)(accountController,
+                                               @selector(activeIMessageAccount));
+    }
+    return nil;
+}
+
+static NSString *nicknameLoginHandleID(IMAccount *account) {
+    if (![account respondsToSelector:@selector(loginIMHandle)]) return nil;
+    id loginHandle = ((id (*)(id, SEL))objc_msgSend)(account, @selector(loginIMHandle));
+    if (![loginHandle respondsToSelector:@selector(ID)]) return nil;
+    id handleID = ((id (*)(id, SEL))objc_msgSend)(loginHandle, @selector(ID));
+    return [handleID isKindOfClass:[NSString class]] && [handleID length] ? handleID : nil;
+}
+
+static NSString *nicknameSenderHandleID(IMChat *chat, NSString **source) {
+    if ([chat respondsToSelector:@selector(lastAddressedHandleID)]) {
+        id handleID = ((id (*)(id, SEL))objc_msgSend)(chat, @selector(lastAddressedHandleID));
+        if ([handleID isKindOfClass:[NSString class]] && [handleID length]) {
+            if (source) *source = @"chat.lastAddressedHandleID";
+            return handleID;
+        }
+    }
+
+    IMAccount *chatAccount = [chat respondsToSelector:@selector(account)]
+        ? ((id (*)(id, SEL))objc_msgSend)(chat, @selector(account))
+        : nil;
+    NSString *chatLoginHandleID = nicknameLoginHandleID(chatAccount);
+    if (chatLoginHandleID.length) {
+        if (source) *source = @"chat.account.loginIMHandle";
+        return chatLoginHandleID;
+    }
+    return nil;
+}
+
+static NSDictionary *handleGetNicknameInfo(NSInteger requestId, NSDictionary *params) {
+    NSString *address = params[@"address"];
+    if (![address isKindOfClass:[NSString class]] || address.length == 0) {
+        return errorResponse(requestId, @"Missing address");
+    }
+
+    @try {
+        id controller = sharedNicknameController();
+        if (!controller) return errorResponse(requestId, @"IMNicknameController unavailable");
+        if (![controller respondsToSelector:@selector(nicknameForHandle:)]) {
+            return errorResponse(requestId, @"nicknameForHandle: unavailable");
+        }
+
+        IMAccount *account = activeIMessageAccount();
+        if (![account respondsToSelector:@selector(imHandleWithID:)]) {
+            return errorResponse(requestId, @"Active iMessage account unavailable");
+        }
+        id handle = ((id (*)(id, SEL, id))objc_msgSend)(account,
+                                                        @selector(imHandleWithID:), address);
+        if (!handle) return errorResponse(requestId, @"Could not resolve iMessage handle");
+
+        id nickname = ((id (*)(id, SEL, id))objc_msgSend)(controller,
+                                                           @selector(nicknameForHandle:), handle);
+        NSMutableDictionary *info = [@{
+            @"address": address,
+            @"has_nickname": @(nickname != nil)
+        } mutableCopy];
+        if (nickname) info[@"description"] = [nickname description] ?: @"";
+        return successResponse(requestId, info);
+    } @catch (NSException *exception) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Nickname lookup failed: %@",
+                                       exception.reason ?: @"unknown exception"]);
+    }
+}
+
+static NSDictionary *handleShouldOfferNicknameSharing(NSInteger requestId,
+                                                       NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if (![chatGuid isKindOfClass:[NSString class]] || chatGuid.length == 0) {
+        return errorResponse(requestId, @"Missing chatGuid");
+    }
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    NSString *observedService = serviceNameForChat(chat, chatGuid);
+    if (![observedService isEqualToString:@"iMessage"]
+        && ![observedService isEqualToString:@"iMessageLite"]) {
+        return errorResponse(requestId, @"Name & Photo sharing requires an iMessage chat");
+    }
+
+    Class nnClass = NSClassFromString(@"IMNicknameController");
+    NSDictionary *capabilities = nicknameSharingSelectorStatus();
+    id controller = nil;
+    @try {
+        controller = sharedNicknameController();
+    } @catch (NSException *exception) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Name & Photo controller failed: %@",
+                                       exception.reason ?: @"unknown exception"]);
+    }
+
+    NSArray *participants = [chat respondsToSelector:@selector(participants)]
+        ? ((id (*)(id, SEL))objc_msgSend)(chat, @selector(participants))
+        : @[];
+    NSString *senderSource = nil;
+    NSString *senderHandleID = nicknameSenderHandleID(chat, &senderSource);
+    BOOL controllerLoaded = controller != nil && waitForNicknameControllerLoad(controller, 1.0);
+    BOOL canInspectOffer = [capabilities[@"should_offer"] boolValue] && controllerLoaded;
+    BOOL canShare = [capabilities[@"share"] boolValue] && controller != nil;
+    BOOL hasPersonalNickname = controllerLoaded
+        && [controller respondsToSelector:@selector(personalNickname)]
+        && ((id (*)(id, SEL))objc_msgSend)(controller, @selector(personalNickname)) != nil;
+    id shouldOffer = [NSNull null];
+    if (canInspectOffer) {
+        @try {
+            BOOL offer = ((BOOL (*)(id, SEL, id))objc_msgSend)(
+                controller, @selector(shouldOfferNicknameSharingForChat:), chat);
+            shouldOffer = @(offer);
+        } @catch (NSException *exception) {
+            return errorResponse(requestId,
+                [NSString stringWithFormat:@"Name & Photo status failed: %@",
+                                           exception.reason ?: @"unknown exception"]);
+        }
+    }
+
+    NSString *shareSelector = nicknameSharingMutationSelectorName(nnClass);
+    BOOL available = canShare && hasPersonalNickname && participants.count > 0
+        && senderHandleID.length > 0;
+    return successResponse(requestId, @{
+        @"chatGuid": chatGuid,
+        @"available": @(available),
+        @"can_inspect_offer": @(canInspectOffer),
+        @"can_share": @(canShare),
+        @"personal_nickname_loaded": @(controllerLoaded),
+        @"has_personal_nickname": @(hasPersonalNickname),
+        @"should_offer": shouldOffer,
+        @"participant_count": @(participants.count),
+        @"from_handle_available": @(senderHandleID.length > 0),
+        @"from_handle_source": senderSource ?: [NSNull null],
+        @"share_selector": shareSelector ?: [NSNull null],
+        @"force_supported": @(canShare)
+    });
+}
+
+static NSDictionary *handleShareNickname(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if (![chatGuid isKindOfClass:[NSString class]] || chatGuid.length == 0) {
+        return errorResponse(requestId, @"Missing chatGuid");
+    }
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    NSString *observedService = serviceNameForChat(chat, chatGuid);
+    if (![observedService isEqualToString:@"iMessage"]
+        && ![observedService isEqualToString:@"iMessageLite"]) {
+        return errorResponse(requestId, @"Name & Photo sharing requires an iMessage chat");
+    }
+
+    NSArray *participants = [chat respondsToSelector:@selector(participants)]
+        ? ((id (*)(id, SEL))objc_msgSend)(chat, @selector(participants))
+        : nil;
+    if (![participants isKindOfClass:[NSArray class]] || participants.count == 0) {
+        return errorResponse(requestId, @"Chat has no participants to share with");
+    }
+
+    Class nnClass = NSClassFromString(@"IMNicknameController");
+    NSString *selectorName = nicknameSharingMutationSelectorName(nnClass);
+    if (!selectorName) return errorResponse(requestId, @"Name & Photo sharing unavailable");
+
+    @try {
+        id controller = sharedNicknameController();
+        if (!controller) return errorResponse(requestId, @"IMNicknameController unavailable");
+        SEL selector = NSSelectorFromString(selectorName);
+        if (![controller respondsToSelector:selector]) {
+            return errorResponse(requestId, @"Name & Photo sharing selector unavailable");
+        }
+        if (!waitForNicknameControllerLoad(controller, 2.0)) {
+            return errorResponse(requestId,
+                @"Personal Name & Photo is still loading; retry the request");
+        }
+        if (![controller respondsToSelector:@selector(personalNickname)]
+            || ((id (*)(id, SEL))objc_msgSend)(controller,
+                                               @selector(personalNickname)) == nil) {
+            return errorResponse(requestId,
+                @"No personal Name & Photo is configured in Messages");
+        }
+
+        BOOL forceSend = YES;
+        NSString *senderSource = nil;
+        NSString *senderHandleID = nicknameSenderHandleID(chat, &senderSource);
+        if (senderHandleID.length == 0) {
+            return errorResponse(requestId, @"Could not resolve the chat's local sending handle");
+        }
+        // Explicit share requests must send even when the handles are already
+        // allow-listed; the private API otherwise only updates policy state.
+        // IMCore forwards fromHandle: unchanged as a local NSString handle ID;
+        // only the participants array contains IMHandle objects.
+        ((void (*)(id, SEL, id, id, id, BOOL))objc_msgSend)(
+            controller, selector, participants, chat, senderHandleID, forceSend);
+
+        return successResponse(requestId, @{
+            @"chatGuid": chatGuid,
+            @"requested": @YES,
+            @"participant_count": @(participants.count),
+            @"share_selector": selectorName,
+            @"force_send": @(forceSend),
+            @"from_handle_source": senderSource ?: [NSNull null]
+        });
+    } @catch (NSException *exception) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Name & Photo sharing failed: %@",
+                                       exception.reason ?: @"unknown exception"]);
+    }
 }
 
 static NSDictionary *handleCheckIMessageAvailability(NSInteger requestId, NSDictionary *params) {
@@ -6218,6 +6477,10 @@ static NSDictionary* dispatchAction(NSInteger legacyId, NSString *action,
     if ([action isEqualToString:@"search-messages"]) return handleSearchMessages(legacyId, params);
     if ([action isEqualToString:@"get-account-info"]) return handleGetAccountInfo(legacyId, params);
     if ([action isEqualToString:@"get-nickname-info"]) return handleGetNicknameInfo(legacyId, params);
+    if ([action isEqualToString:@"should-offer-nickname-sharing"])
+        return handleShouldOfferNicknameSharing(legacyId, params);
+    if ([action isEqualToString:@"share-nickname"])
+        return handleShareNickname(legacyId, params);
     if ([action isEqualToString:@"check-imessage-availability"])
         return handleCheckIMessageAvailability(legacyId, params);
     if ([action isEqualToString:@"download-purged-attachment"])
